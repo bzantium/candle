@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0814">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>후~ 촛불 끄기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap" rel="stylesheet">
+<style>
+/* One visual world: a dark room lit only by candle flames. The scene is painted on a canvas; the room dims as flames go out. */
+:root {
+  color-scheme: dark;
+  --night: #171126;
+  --night-deep: #07050d;
+  --glow: #ffb648;
+  --ember: #ff7a3c;
+  --ink: #f6ead9;
+  --ink-soft: #a999bd;
+  --font-display: "Jua", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "Gowun Dodum", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --lit: 1;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--night-deep);
+  color: var(--ink);
+  font-family: var(--font-body);
+  overflow: hidden;
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.room {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 16px 20px;
+  gap: 10px;
+  background:
+    radial-gradient(75% 50% at 50% 42%, rgba(255, 170, 70, calc(.30 * var(--lit))) 0%, transparent 72%),
+    linear-gradient(var(--night), var(--night-deep) 70%);
+}
+header { text-align: center; display: flex; flex-direction: column; gap: 4px; }
+h1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(26px, 7.5vw, 38px);
+  margin: 0;
+  text-wrap: balance;
+}
+#hint { margin: 0; font-size: 16px; color: var(--ink-soft); min-height: 1.5em; text-wrap: balance; }
+
+.stage { position: relative; flex: 1; min-height: 0; width: 100%; touch-action: none; }
+#scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.controls { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.row { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+button {
+  font: inherit; color: inherit; border: 0; cursor: pointer;
+  border-radius: 999px; min-height: 48px; padding: 0 18px;
+  background: rgba(255,255,255,.10);
+}
+button:focus-visible { outline: 3px solid var(--glow); outline-offset: 2px; }
+button:active { transform: scale(.97); }
+#blowBtn, #relightBtn {
+  font-family: var(--font-display); font-size: 23px; min-height: 62px;
+  background: rgba(255, 182, 72, .16); color: var(--ink);
+  box-shadow: inset 0 0 0 2px rgba(255, 182, 72, .55);
+}
+#relightBtn { background: var(--glow); color: #3a2200; box-shadow: none; }
+.stepper { display: flex; align-items: center; gap: 6px; }
+.stepper button { width: 48px; padding: 0; font-size: 24px; }
+#count { font-family: var(--font-display); font-size: 21px; min-width: 4.5em; text-align: center; font-variant-numeric: tabular-nums; }
+#micBtn[aria-pressed="true"] { background: rgba(255, 182, 72, .28); }
+.meter { height: 6px; border-radius: 3px; background: rgba(255,255,255,.10); overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; background: var(--glow); border-radius: 3px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="room" id="room">
+  <header>
+    <h1 id="title">후~ 불어서 촛불 끄기</h1>
+    <p id="hint" aria-live="polite">불꽃을 손가락으로 쓱 스치거나, 아래 버튼을 꾹 눌러요</p>
+  </header>
+
+  <div class="stage" id="stage">
+    <canvas id="scene" role="img" aria-label="촛불이 켜진 케이크"></canvas>
+  </div>
+
+  <div class="controls">
+    <button id="blowBtn" type="button">후~ 불기 (꾹 누르기)</button>
+    <button id="relightBtn" type="button" hidden>촛불 다시 켜기</button>
+    <div class="meter" id="meter" hidden><i id="meterFill"></i></div>
+    <div class="row">
+      <div class="stepper">
+        <button id="minus" type="button" aria-label="초 하나 빼기">−</button>
+        <span id="count">초 3개</span>
+        <button id="plus" type="button" aria-label="초 하나 더하기">+</button>
+      </div>
+      <button id="micBtn" type="button" aria-pressed="false">마이크로 불기</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var WAX = ["#e9a3b4", "#9fc6e6", "#efd9a0", "#a9d6b0", "#c4b0e6", "#f0b48f", "#f3ead9"];
+  var MIN = 1, MAX = 7;
+  var count = 3;
+  var room = document.getElementById("room");
+  var stage = document.getElementById("stage");
+  var cv = document.getElementById("scene");
+  var ctx = cv.getContext("2d");
+  var hint = document.getElementById("hint");
+  var title = document.getElementById("title");
+  var blowBtn = document.getElementById("blowBtn");
+  var relightBtn = document.getElementById("relightBtn");
+  var micBtn = document.getElementById("micBtn");
+  var meter = document.getElementById("meter");
+  var meterFill = document.getElementById("meterFill");
+  var countEl = document.getElementById("count");
+  var calm = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var W = 300, H = 300, k = 1, G = {};
+  var candles = [], smoke = [];
+  var holding = false, holdWind = 0, prevWind = 0, dir = 1;
+  var micOn = false, micLevel = 0, analyser = null, buf = null, audioCtx = null;
+  var done = false;
+  var baseHint = "불꽃을 손가락으로 쓱 스치거나, 아래 버튼을 꾹 눌러요";
+
+  try { var saved = parseInt(localStorage.getItem("candle-count"), 10); if (saved >= MIN && saved <= MAX) count = saved; } catch (e) {}
+
+  function build() {
+    candles = [];
+    for (var i = 0; i < count; i++) {
+      candles.push({ p: Math.random() * 10, s: 1, lit: true, lw: 0, wi: 0, ember: 0, smoke: 0, igniteAt: 0, color: WAX[i % WAX.length] });
+    }
+    smoke = [];
+    countEl.textContent = "초 " + count + "개";
+    layout();
+    setDone(false);
+  }
+
+  function resize() {
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = Math.max(120, stage.clientWidth); H = Math.max(120, stage.clientHeight);
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    layout();
+  }
+
+  function layout() {
+    k = Math.max(.5, Math.min(1.3, H / 360, W / 340));
+    var cw = 300 * k, rx = cw / 2, ry = cw * .15, ch = 90 * k;
+    var baseY = H - 12 - ry * 1.2, topY = baseY - ch, cx = W / 2;
+    G = { cx: cx, rx: rx, ry: ry, baseY: baseY, topY: topY };
+    var n = candles.length;
+    var gap = n > 1 ? Math.min(42 * k, cw * .7 / (n - 1)) : 0;
+    for (var i = 0; i < n; i++) {
+      var c = candles[i];
+      c.x = cx + (i - (n - 1) / 2) * gap;
+      c.z = n > 1 ? (i % 2 ? -1 : 1) * ry * .22 : 0;
+      c.y = topY + c.z;
+      c.h = 78 * k; c.w = 11 * k;
+    }
+  }
+
+  /* ---------- painting ---------- */
+  function ellipse(x, y, rx, ry) { ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); }
+
+  function drawCakeBody() {
+    var g, cx = G.cx, rx = G.rx, ry = G.ry;
+    // plate
+    g = ctx.createLinearGradient(cx - rx * 1.2, 0, cx + rx * 1.2, 0);
+    g.addColorStop(0, "#8f899c"); g.addColorStop(.4, "#d9d4e4"); g.addColorStop(1, "#77718a");
+    ctx.fillStyle = g; ellipse(cx, G.baseY + 5 * k, rx * 1.2, ry * 1.2); ctx.fill();
+    // side
+    ctx.beginPath();
+    ctx.moveTo(cx - rx, G.topY); ctx.lineTo(cx - rx, G.baseY);
+    ctx.ellipse(cx, G.baseY, rx, ry, 0, Math.PI, 0, true);
+    ctx.lineTo(cx + rx, G.topY); ctx.closePath();
+    g = ctx.createLinearGradient(cx - rx, 0, cx + rx, 0);
+    g.addColorStop(0, "#b9a487"); g.addColorStop(.28, "#f4e6d0"); g.addColorStop(.5, "#fff4e2"); g.addColorStop(.78, "#e2cfb2"); g.addColorStop(1, "#a8926f");
+    ctx.fillStyle = g; ctx.fill();
+    // top
+    g = ctx.createRadialGradient(cx, G.topY, 0, cx, G.topY, rx);
+    g.addColorStop(0, "#fff8ea"); g.addColorStop(1, "#ecdcc2");
+    ctx.fillStyle = g; ellipse(cx, G.topY, rx, ry); ctx.fill();
+  }
+
+  function drawDollops(front) {
+    var N = 22, r = 8.5 * k;
+    for (var j = 0; j < N; j++) {
+      var a = j / N * Math.PI * 2 + .14, sn = Math.sin(a);
+      if ((sn >= 0) !== front) continue;
+      var px = G.cx + Math.cos(a) * G.rx * .93, py = G.topY + sn * G.ry * .93 - r * .25;
+      var g = ctx.createRadialGradient(px - r * .3, py - r * .4, r * .1, px, py, r);
+      g.addColorStop(0, "#fffdf6"); g.addColorStop(.7, "#f1e2ca"); g.addColorStop(1, "#cdb894");
+      ctx.fillStyle = g; ellipse(px, py, r, r * .82); ctx.fill();
+    }
+  }
+
+  function drawCandle(c, i) {
+    var x = c.x, y = c.y, w = c.w, h = c.h, top = y - h, r = w * .35;
+    // contact shadow
+    ctx.fillStyle = "rgba(60,40,20,.22)"; ellipse(x, y, w * .9, w * .32); ctx.fill();
+    // wax body
+    ctx.beginPath();
+    ctx.moveTo(x - w / 2, y); ctx.lineTo(x - w / 2, top + r);
+    ctx.quadraticCurveTo(x - w / 2, top, x - w / 2 + r, top);
+    ctx.lineTo(x + w / 2 - r, top);
+    ctx.quadraticCurveTo(x + w / 2, top, x + w / 2, top + r);
+    ctx.lineTo(x + w / 2, y);
+    ctx.ellipse(x, y, w / 2, w * .18, 0, 0, Math.PI, false);
+    ctx.closePath();
+    ctx.fillStyle = c.color; ctx.fill();
+    var g = ctx.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+    g.addColorStop(0, "rgba(0,0,0,.38)"); g.addColorStop(.32, "rgba(255,255,255,.42)"); g.addColorStop(.6, "rgba(255,255,255,0)"); g.addColorStop(1, "rgba(0,0,0,.42)");
+    ctx.fillStyle = g; ctx.fill();
+    // wax drip
+    var side = i % 2 ? 1 : -1, dy = top + (9 + (i * 7) % 12) * k;
+    ctx.fillStyle = c.color; ellipse(x + side * w * .44, dy, 2.3 * k, 6.5 * k); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.28)"; ellipse(x + side * w * .44 - .6 * k, dy - 1.5 * k, .9 * k, 3.5 * k); ctx.fill();
+    // wick
+    ctx.strokeStyle = "#231712"; ctx.lineWidth = 1.7 * k; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x, top + 1); ctx.quadraticCurveTo(x + 1.5 * k, top - 4 * k, x + .5 * k, top - 7.5 * k); ctx.stroke();
+  }
+
+  function flamePath(x, y, h, w, lean) {
+    var tx = x + lean * h * .9, ty = y - h, bend = lean * h * .35;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.bezierCurveTo(x - w, y - h * .04, x - w * .92 + bend, y - h * .56, tx, ty);
+    ctx.bezierCurveTo(x + w * .92 + bend, y - h * .56, x + w, y - h * .04, x, y);
+    ctx.closePath();
+    return [tx, ty];
+  }
+
+  function drawFlame(c, t) {
+    if (!c.lit) return;
+    var n1 = calm ? 0 : (Math.sin(t * 7 + c.p) + Math.sin(t * 13.3 + c.p * 2) * .5 + Math.sin(t * 23.7 + c.p * 3) * .25) / 1.75;
+    var n2 = calm ? 0 : (Math.sin(t * 5.1 + c.p * 4) + Math.sin(t * 11.7 + c.p) * .5) / 1.5;
+    var wi = Math.min(1.15, c.wi);
+    var h = 46 * k * (.92 + .08 * n1) * Math.pow(c.s, .7) * (1 - .45 * Math.min(1, wi));
+    var w = 8.5 * k * (.75 + .25 * c.s);
+    var lean = dir * wi * .85 + .05 * n2;
+    var x = c.x + .5 * k, y = c.y - c.h - 3 * k;
+
+    // halo
+    ctx.globalCompositeOperation = "lighter";
+    var hx = x + lean * h * .4, hy = y - h * .5, R = 150 * k;
+    var g = ctx.createRadialGradient(hx, hy, 0, hx, hy, R);
+    g.addColorStop(0, "rgba(255,180,80," + (.34 * c.s).toFixed(3) + ")");
+    g.addColorStop(.35, "rgba(255,140,50," + (.10 * c.s).toFixed(3) + ")");
+    g.addColorStop(1, "rgba(255,120,40,0)");
+    ctx.fillStyle = g; ctx.fillRect(hx - R, hy - R, R * 2, R * 2);
+    ctx.globalCompositeOperation = "source-over";
+
+    // outer flame: blue at the base, amber body, soft tip
+    var tip = flamePath(x, y, h, w, lean);
+    g = ctx.createLinearGradient(x, y, tip[0], tip[1]);
+    g.addColorStop(0, "rgba(60,110,255,.55)");
+    g.addColorStop(.16, "rgba(255,130,40,.85)");
+    g.addColorStop(.45, "rgba(255,210,110,.97)");
+    g.addColorStop(.82, "rgba(255,236,175,.9)");
+    g.addColorStop(1, "rgba(255,190,90,.3)");
+    ctx.shadowColor = "rgba(255,150,50,.9)"; ctx.shadowBlur = 22 * k;
+    ctx.fillStyle = g; ctx.fill();
+    ctx.shadowBlur = 0; ctx.shadowColor = "transparent";
+
+    // bright core with the darker zone around the wick
+    var tip2 = flamePath(x, y - h * .06, h * .72, w * .55, lean);
+    g = ctx.createLinearGradient(x, y, tip2[0], tip2[1]);
+    g.addColorStop(0, "rgba(110,60,30,.35)");
+    g.addColorStop(.3, "rgba(255,250,228,.95)");
+    g.addColorStop(1, "rgba(255,246,205,0)");
+    ctx.fillStyle = g; ctx.fill();
+  }
+
+  function drawLightOnScene(c) {
+    if (c.s <= 0) return;
+    // warm pool on the cake top
+    ctx.save(); ctx.translate(c.x, c.y); ctx.scale(1, .36);
+    var R = 75 * k, g = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
+    g.addColorStop(0, "rgba(255,190,100," + (.30 * c.s).toFixed(3) + ")"); g.addColorStop(1, "rgba(255,170,80,0)");
+    ctx.fillStyle = g; ctx.fillRect(-R, -R, R * 2, R * 2); ctx.restore();
+    // wax glowing through near the flame
+    var top = c.y - c.h;
+    g = ctx.createLinearGradient(0, top, 0, top + c.h * .5);
+    g.addColorStop(0, "rgba(255,190,100," + (.55 * c.s).toFixed(3) + ")"); g.addColorStop(1, "rgba(255,170,80,0)");
+    ctx.fillStyle = g; ctx.fillRect(c.x - c.w / 2, top, c.w, c.h * .5);
+  }
+
+  function drawEmber(c) {
+    if (c.lit || c.ember <= 0) return;
+    var x = c.x + .5 * k, y = c.y - c.h - 7 * k, R = 7 * k;
+    ctx.globalCompositeOperation = "lighter";
+    var g = ctx.createRadialGradient(x, y, 0, x, y, R);
+    g.addColorStop(0, "rgba(255,150,70," + (.95 * c.ember).toFixed(3) + ")"); g.addColorStop(.3, "rgba(255,80,30," + (.5 * c.ember).toFixed(3) + ")"); g.addColorStop(1, "rgba(255,60,20,0)");
+    ctx.fillStyle = g; ctx.fillRect(x - R, y - R, R * 2, R * 2);
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function drawSmoke() {
+    for (var i = 0; i < smoke.length; i++) {
+      var s = smoke[i], a = Math.max(0, 1 - s.age / s.life) * .13;
+      var g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r);
+      g.addColorStop(0, "rgba(215,212,228," + a.toFixed(3) + ")"); g.addColorStop(1, "rgba(215,212,228,0)");
+      ctx.fillStyle = g; ctx.fillRect(s.x - s.r, s.y - s.r, s.r * 2, s.r * 2);
+    }
+  }
+
+  function paint(t, light) {
+    ctx.clearRect(0, 0, W, H);
+    drawCakeBody();
+    drawDollops(false);
+    var order = candles.map(function (c, i) { return i; }).sort(function (a, b) { return candles[a].z - candles[b].z; });
+    order.forEach(function (i) { drawCandle(candles[i], i); });
+    drawDollops(true);
+    // the room goes dark as flames die
+    ctx.globalCompositeOperation = "source-atop";
+    ctx.fillStyle = "rgba(6,4,14," + (.25 + .5 * (1 - light)).toFixed(3) + ")";
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "lighter";
+    candles.forEach(drawLightOnScene);
+    ctx.globalCompositeOperation = "source-over";
+    drawSmoke();
+    order.forEach(function (i) { drawEmber(candles[i]); drawFlame(candles[i], t); });
+  }
+
+  /* ---------- simulation ---------- */
+  function setDone(d) {
+    done = d;
+    blowBtn.hidden = d; relightBtn.hidden = !d;
+    title.textContent = d ? "와, 다 껐다!" : "후~ 불어서 촛불 끄기";
+    hint.textContent = d ? "참 잘했어요! 한 번 더 할까요?" : baseHint;
+    if (d) holding = false;
+  }
+
+  function relight() {
+    var now = performance.now();
+    candles.forEach(function (c, i) { if (!c.lit) c.igniteAt = now + 120 + i * 160; });
+    setDone(false);
+  }
+
+  function readMic() {
+    if (!micOn || !analyser || !analyser.getFloatTimeDomainData) return 0;
+    analyser.getFloatTimeDomainData(buf);
+    var sum = 0;
+    for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    micLevel = micLevel * .6 + Math.sqrt(sum / buf.length) * .4;
+    return micLevel;
+  }
+
+  var last = performance.now();
+  function tick(now) {
+    var dt = Math.min(.05, (now - last) / 1000); last = now;
+    var t = now / 1000;
+
+    var level = readMic();
+    if (micOn) meterFill.style.width = Math.min(100, Math.round(level / .22 * 100)) + "%";
+    var micWind = Math.max(0, Math.min(1.3, (level - .04) / .14));
+    holdWind += ((holding ? 1 : 0) - holdWind) * Math.min(1, dt * (holding ? 6 : 7));
+    var wind = Math.max(micWind, holdWind);
+    if (wind > .05 && prevWind <= .05) dir = Math.random() < .5 ? -1 : 1;
+    prevWind = wind;
+
+    var light = 0, anyLit = false, pending = false;
+    for (var i = 0; i < candles.length; i++) {
+      var c = candles[i];
+      if (c.igniteAt) {
+        if (now >= c.igniteAt) { c.lit = true; c.s = .15; c.igniteAt = 0; c.smoke = 0; c.ember = 0; }
+        else pending = true;
+      }
+      c.lw *= Math.exp(-dt * 4);
+      var turb = .75 + .5 * (.5 + .5 * Math.sin(t * 5 + c.p * 7));
+      c.wi = wind * turb + c.lw;
+      if (c.lit) {
+        // a gentle breath only makes it dance; a strong, steady one starves it
+        if (c.wi > .35) c.s -= (c.wi - .35) * dt * 2.6; else c.s = Math.min(1, c.s + dt * 1.5);
+        if (c.s <= .12) { c.lit = false; c.s = 0; c.ember = 1; c.smoke = 2.6; }
+        else { anyLit = true; light += c.s; }
+      } else {
+        c.ember = Math.max(0, c.ember - dt / 1.8);
+        if (c.smoke > 0) {
+          c.smoke -= dt;
+          if (smoke.length < 220 && Math.random() < 45 * (c.smoke / 2.6) * dt) {
+            smoke.push({ x: c.x + .5 * k, y: c.y - c.h - 8 * k, vx: (Math.random() - .5) * 8 * k + dir * c.wi * 30 * k, vy: -(26 + Math.random() * 16) * k,
+              r: (3 + Math.random() * 2) * k, age: 0, life: 1.8 + Math.random() * 1.2, ph: Math.random() * 6 });
+          }
+        }
+      }
+    }
+    for (var j = smoke.length - 1; j >= 0; j--) {
+      var s = smoke[j];
+      s.age += dt;
+      if (s.age >= s.life) { smoke.splice(j, 1); continue; }
+      s.x += (s.vx + Math.sin(s.age * 3 + s.ph) * 10 * k) * dt; s.y += s.vy * dt;
+      s.vx *= (1 - dt * .8); s.r += dt * 9 * k;
+    }
+    light = candles.length ? light / candles.length : 0;
+    room.style.setProperty("--lit", light.toFixed(2));
+
+    if (!anyLit && !pending && !done) { setDone(true); chime(); }
+    paint(t, light);
+    requestAnimationFrame(tick);
+  }
+
+  /* ---------- input ---------- */
+  var lastPX = null;
+  function gust(e) {
+    var r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+    for (var i = 0; i < candles.length; i++) {
+      var c = candles[i], top = c.y - c.h;
+      if (Math.abs(px - c.x) < 22 * k + 4 && py > top - 62 * k && py < top + 10 * k) {
+        c.lw = 1.8;
+        if (lastPX !== null && px !== lastPX) dir = px > lastPX ? 1 : -1;
+      }
+    }
+    lastPX = px;
+  }
+  stage.addEventListener("pointerdown", function (e) { ensureAudio(); lastPX = null; gust(e); });
+  stage.addEventListener("pointermove", function (e) { if (e.pointerType === "mouse" && e.buttons === 0) return; gust(e); });
+
+  blowBtn.addEventListener("pointerdown", function (e) { ensureAudio(); holding = true; try { blowBtn.setPointerCapture(e.pointerId); } catch (err) {} });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach(function (ev) { blowBtn.addEventListener(ev, function () { holding = false; }); });
+  blowBtn.addEventListener("keydown", function (e) { if (e.key === " " || e.key === "Enter") { e.preventDefault(); holding = true; } });
+  blowBtn.addEventListener("keyup", function () { holding = false; });
+  blowBtn.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+
+  relightBtn.addEventListener("click", function () { ensureAudio(); relight(); });
+  document.getElementById("minus").addEventListener("click", function () { setCount(count - 1); });
+  document.getElementById("plus").addEventListener("click", function () { setCount(count + 1); });
+  function setCount(n) {
+    count = Math.max(MIN, Math.min(MAX, n));
+    try { localStorage.setItem("candle-count", String(count)); } catch (e) {}
+    build();
+  }
+
+  /* ---------- microphone and sound ---------- */
+  function ensureAudio() {
+    if (audioCtx) { if (audioCtx.state === "suspended") { try { audioCtx.resume(); } catch (e) {} } return; }
+    try { var AC = window.AudioContext || window.webkitAudioContext; if (AC) audioCtx = new AC(); } catch (e) { audioCtx = null; }
+  }
+  micBtn.addEventListener("click", function () {
+    if (micOn) return;
+    ensureAudio();
+    if (!audioCtx || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { micUnavailable(); return; }
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+      .then(function (stream) {
+        var src = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 1024;
+        buf = new Float32Array(analyser.fftSize);
+        src.connect(analyser);
+        micOn = true;
+        micBtn.setAttribute("aria-pressed", "true");
+        micBtn.textContent = "마이크 켜짐";
+        meter.hidden = false;
+        baseHint = "휴대폰 마이크에 대고 후~ 하고 세게 불어요";
+        if (!done) hint.textContent = baseHint;
+      })
+      .catch(micUnavailable);
+  });
+  function micUnavailable() {
+    micBtn.hidden = true;
+    baseHint = "여기서는 마이크를 쓸 수 없어요. 불꽃을 쓱 스치거나 버튼을 꾹 눌러요";
+    if (!done) hint.textContent = baseHint;
+  }
+  function chime() {
+    if (!audioCtx || audioCtx.state !== "running") return;
+    try {
+      [523.25, 659.25, 783.99, 1046.5].forEach(function (f, i) {
+        var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        var t = audioCtx.currentTime + .25 + i * .13;
+        o.type = "triangle"; o.frequency.value = f;
+        g.gain.setValueAtTime(.0001, t);
+        g.gain.exponentialRampToValueAtTime(.16, t + .02);
+        g.gain.exponentialRampToValueAtTime(.0001, t + .5);
+        o.connect(g); g.connect(audioCtx.destination);
+        o.start(t); o.stop(t + .55);
+      });
+    } catch (e) {}
+  }
+
+  window.addEventListener("resize", resize);
+  build();
+  resize();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
