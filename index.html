@@ -131,7 +131,7 @@ button:active { transform: scale(.97); }
   var W = 300, H = 300, k = 1, G = {};
   var candles = [], smoke = [];
   var holding = false, holdWind = 0, prevWind = 0, dir = 1;
-  var micOn = false, micLevel = 0, analyser = null, buf = null, audioCtx = null;
+  var micOn = false, micLevel = 0, micFloor = -1, analyser = null, buf = null, audioCtx = null;
   var done = false;
   var baseHint = "불꽃을 손가락으로 쓱 스치거나, 아래 버튼을 꾹 눌러요";
 
@@ -355,8 +355,12 @@ button:active { transform: scale(.97); }
     analyser.getFloatTimeDomainData(buf);
     var sum = 0;
     for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-    micLevel = micLevel * .6 + Math.sqrt(sum / buf.length) * .4;
-    return micLevel;
+    var rms = Math.sqrt(sum / buf.length);
+    micLevel = rms > micLevel ? micLevel * .3 + rms * .7 : micLevel * .7 + rms * .3;
+    // follow the room's background noise so even a small puff stands out from it
+    if (micFloor < 0) micFloor = micLevel;
+    micFloor += (micLevel - micFloor) * (micLevel < micFloor ? .2 : .002);
+    return Math.max(0, micLevel - micFloor * 1.4);
   }
 
   var last = performance.now();
@@ -365,8 +369,8 @@ button:active { transform: scale(.97); }
     var t = now / 1000;
 
     var level = readMic();
-    if (micOn) meterFill.style.width = Math.min(100, Math.round(level / .22 * 100)) + "%";
-    var micWind = Math.max(0, Math.min(1.3, (level - .04) / .14));
+    if (micOn) meterFill.style.width = Math.min(100, Math.round(level / .06 * 100)) + "%";
+    var micWind = Math.max(0, Math.min(1.3, (level - .006) / .03));
     holdWind += ((holding ? 1 : 0) - holdWind) * Math.min(1, dt * (holding ? 6 : 7));
     var wind = Math.max(micWind, holdWind);
     if (wind > .05 && prevWind <= .05) dir = Math.random() < .5 ? -1 : 1;
@@ -384,7 +388,7 @@ button:active { transform: scale(.97); }
       c.wi = wind * turb + c.lw;
       if (c.lit) {
         // a gentle breath only makes it dance; a strong, steady one starves it
-        if (c.wi > .35) c.s -= (c.wi - .35) * dt * 2.6; else c.s = Math.min(1, c.s + dt * 1.5);
+        if (c.wi > .22) c.s -= (c.wi - .22) * dt * 5; else c.s = Math.min(1, c.s + dt * .5);
         if (c.s <= .12) { c.lit = false; c.s = 0; c.ember = 1; c.smoke = 2.6; }
         else { anyLit = true; light += c.s; }
       } else {
@@ -453,7 +457,7 @@ button:active { transform: scale(.97); }
     if (micOn) return;
     ensureAudio();
     if (!audioCtx || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { micUnavailable(); return; }
-    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true } })
       .then(function (stream) {
         var src = audioCtx.createMediaStreamSource(stream);
         analyser = audioCtx.createAnalyser();
@@ -464,7 +468,7 @@ button:active { transform: scale(.97); }
         micBtn.setAttribute("aria-pressed", "true");
         micBtn.textContent = "마이크 켜짐";
         meter.hidden = false;
-        baseHint = "휴대폰 마이크에 대고 후~ 하고 세게 불어요";
+        baseHint = "휴대폰 마이크 가까이에서 후~ 불어요";
         if (!done) hint.textContent = baseHint;
       })
       .catch(micUnavailable);
